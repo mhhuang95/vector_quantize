@@ -10,7 +10,7 @@ def ema_inplace(moving_avg, new, decay):
 def laplace_smoothing(x, n_categories, eps=1e-5):
     return (x + eps) / (x.sum() + n_categories * eps)
 
-def kmeans(x, num_clusters, num_iters=10):
+def kmeans(x, num_clusters, num_iters=10, use_cosine_sim = False):
     samples = rearrange(x, '... d -> (...) d')
     num_samples, dim = samples.shape
     dtype = x.dtype
@@ -24,8 +24,12 @@ def kmeans(x, num_clusters, num_iters=10):
     centers = samples[indices]
 
     for _ in range(num_iters):
-        dists = samples.pow(2).sum(1, keepdim=True) - 2 * samples @ centers.t() + centers.t().pow(2).sum(0, keepdim=True)
-        buckets = dists.argmin(dim=-1)
+        if use_cosine_sim:
+            dists = samples @ centers.t()
+            buckets = dists.max(dim = -1).indices
+        else:
+            dists = samples.pow(2).sum(1, keepdim=True) - 2 * samples @ centers.t() + centers.t().pow(2).sum(0, keepdim=True)
+            buckets = dists.argmin(dim=-1)
 
         bins = torch.bincount(buckets, minlength = num_clusters)
         zero_mask = bins == 0
@@ -34,61 +38,178 @@ def kmeans(x, num_clusters, num_iters=10):
         new_centers = buckets.new_zeros(num_clusters, dim, dtype=dtype)
         new_centers.scatter_add_(0, repeat(buckets, 'n -> n d', d = dim), samples)
         new_centers = new_centers / bins[..., None]
+
+        if use_cosine_sim:
+            new_centers = F.normalize(new_centers, dim = -1)
+
         centers = torch.where(zero_mask[..., None], centers, new_centers)
-    return rearrange(centers, 'n d -> d n')
+    return centers
 
-class VectorQuantize(nn.Module):
-    def __init__ (self, dim, n_embed, decay=0.1, commitment=1., eps=1e-5, kmeans_init=False, kmeans_iters=10):
+
+class EuclideanCodebook(nn.Module):
+    def __init__(
+        self,
+        dim,
+        codebook_size,
+        kmeans_init = False,
+        kmeans_iters = 10,
+        decay = 0.8,
+        eps = 1e-5
+    ):
         super().__init__()
-
-        self.dim = dim
-        self.n_embed = n_embed
         self.decay = decay
-        self.commitment = commitment
-        self.eps = eps
 
         init_fn = torch.randn if not kmeans_init else torch.zeros
-        embed = init_fn(dim, n_embed)
+        embed = init_fn(codebook_size, dim)
 
-        embed = torch.randn(dim, n_embed)
+        self.codebook_size = codebook_size
         self.kmeans_iters = kmeans_iters
+        self.eps = eps
+        
         self.register_buffer('initted', torch.Tensor([not kmeans_init]))
         self.register_buffer('embed', embed)
-        self.register_buffer('cluster_size', torch.zeros(n_embed))
+        self.register_buffer('cluster_size', torch.zeros(codebook_size))
         self.register_buffer('embed_avg', embed.clone())
-    
+
+
     def init_embed_(self, data):
-        embed = kmeans(data, self.n_embed, self.kmeans_iters)
+        embed = kmeans(data, self.codebook_size, self.kmeans_iters)
         self.embed.data.copy_(embed)
         self.embed_avg.data.copy_(embed.clone())
         self.initted.data.copy_(torch.Tensor([True]))
 
-    def forward(self, input):
+    def forward(self, x):
+        shape, dtype = x.shape, x.dtype
+        flatten = rearrange(x, '... d -> (...) d')
+        embed = self.embed.t()
+    
         if not self.initted:
-            self.init_embed_(input)
+            self.init_embed_(flatten)
+        
+        dist = -(flatten.pow(2).sum(1, keepdim=True) - 2 * flatten @ embed + embed.pow(2).sum(0, keepdim=True))
+        embed_ind = dist.max(dim = -1).indices
+        embed_onehot = F.one_hot(embed_ind, self.codebook_size).type(dtype)
+        embed_ind = embed_ind.view(*shape[:-1])
 
-        dtype = input.dtype
-        flatten = input.reshape(-1, self.dim)
-        dist = (
-            flatten.pow(2).sum(1, keepdim=True) - 2 * flatten @ self.embed + self.embed.pow(2).sum(0, keepdim=True)
-        )
+        quantize = F.embedding(embed_ind, self.embed)
 
-        _, embed_ind = (-dist).max(1)
-        embed_onehot = F.one_hot(embed_ind, self.n_embed).type(dtype)
-        embed_ind = embed_ind.view(*input.shape[:-1])
-        quantize = F.embedding(embed_ind, self.embed.transpose(0, 1))
-
-        commot_loss = 0
         if self.training:
             ema_inplace(self.cluster_size, embed_onehot.sum(0), self.decay)
-            embed_sum = flatten.transpose(0, 1) @ embed_onehot
-            ema_inplace(self.embed_avg, embed_sum, self.decay)
-            cluster_size = laplace_smoothing(self.cluster_size, self.n_embed, self.eps) * self.cluster_size.sum()
-            embed_normalized = self.embed_avg / cluster_size.unsqueeze(0)
-            self.embed.data.copy_(embed_normalized)
+            embed_sum = flatten.t() @ embed_onehot
+            ema_inplace(self.embed_avg, embed_sum.t(), self.decay)
+            cluster_size = laplace_smoothing(self.cluster_size, self.codebook_size, self.eps) * self.cluster_size.sum()
+            embed_normalized = self.embed_avg / cluster_size.unsqueeze(1)
+            self.embed.data.copy(embed_normalized)
+        
+        return quantize, embed_ind
 
-            commit_loss = F.mse_loss(quantize.detach(), input) * self.commitment
+
+
+class CosineSimCodebook(nn.Module):
+    def __init__(
+        self,
+        dim,
+        codebook_size,
+        kmeans_init = False,
+        kmeans_iters = 10,
+        decay = 0.8,
+        eps = 1e-5
+    ):
+        super().__init__()
+        self.decay = decay
+
+        if not kmeans_init:
+            embed = F.normalize(torch.randn(codebook_size, dim), dim = -1)
+        else:
+            embed = torch.zeros(codebook_size, dim)
+
+        self.codebook_size = codebook_size
+        self.kmeans_iters = kmeans_iters
+        self.eps = eps
+        
+        self.register_buffer('initted', torch.Tensor([not kmeans_init]))
+        self.register_buffer('embed', embed)
+
+    def init_embed_(self, data):
+        embed = kmeans(data, self.codebook_size, self.kmeans_iters, use_cosine_sim=True)
+        self.embed.data.copy_(embed)
+        self.initted.data.copy_(torch.Tensor([True]))
+
+    def forward(self, x):
+        shape, dtype = x.shape, x.dtype
+        flatten = rearrange(x, '... d -> (...) d')
+        flatten = F.normalize(flatten, dim = -1)
+        embed = F.normalize(self.embed, dim = -1)
+    
+        if not self.initted:
+            self.init_embed_(flatten)
+        
+        dist = flatten @ embed.t()
+        embed_ind = dist.max(dim = -1).indices
+        embed_onehot = F.one_hot(embed_ind, self.codebook_size).type(dtype)
+        embed_ind = embed_ind.view(*shape[:-1])
+
+        quantize = F.embedding(embed_ind, self.embed)
+
+        if self.training:
+            bins = embed_onehot.sum(0)
+            zero_mask = (bins == 0)
+            bins = bins.masked_fill(zero_mask, 1.)
+
+            embed_sum = flatten.t() @ embed_onehot
+            embed_normalized = (embed_sum / bins.unsqueeze(0)).t()
+            embed_normalized = F.normalize(embed_normalized, dim = -1)
+            embed_normalized = torch.where(zero_mask[..., None], embed, embed_normalized)
+            ema_inplace(self.embed, embed_normalized, self.decay)
+        
+        return quantize, embed_ind
+
+
+class VectorQuantize(nn.Module):
+    def __init__ (self, dim, codebook_size, codebook_dim = None, decay=0.1, commitment=1., eps=1e-5, kmeans_init=False, kmeans_iters=10, use_cosine_sim=False):
+        super().__init__()
+
+        if not codebook_dim:
+            codebook_dim = dim
+            require_projection = False
+        else:
+            require_projection = True
+        self.projection_in = nn.Linear(dim, codebook_dim) if require_projection else nn.Identity()
+        self.projection_out = nn.Linear(codebook_dim, dim) if require_projection else nn.Identity()
+
+        self.codebook_size = codebook_size
+        self.decay = decay
+        self.commitment = commitment
+        self.eps = eps
+
+        klass = EuclideanCodebook if not use_cosine_sim else CosineSimCodebook
+
+        self._codebook = klass(
+            dim = codebook_dim,
+            codebook_size = codebook_size,
+            kmeans_init = kmeans_init,
+            kmeans_iters = kmeans_iters,
+            decay = decay,
+            eps = eps,
+        )
+    
+    @property
+    def codebook(self):
+        return self._codebook.codebook
+    
+    def forward(self, x):
+        dtype = x.dtype
+        x = self.projection_in(x)
+
+        quantize, embed_ind = self._codebook(x)
+        
+        commot_loss = 0
+        if self.training:
+
+            commit_loss = F.mse_loss(quantize.detach(), x) * self.commitment
 
             # straight through for gradient transfer
-            quantize = input + (quantize - input).detach()
+            quantize = x + (quantize - x).detach()
+        
+        quantize = self.projection_out(quantize)
         return quantize, embed_ind, commit_loss
