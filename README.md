@@ -25,7 +25,7 @@ quantized, indices, commit_loss = vq(x)
 
 ## Cosine Similarity VQ
 
-this paper https://openreview.net/forum?id=pfNyExj7z2 proposed to use cosine similarity to replace the l2 distance in nearest neighbor computation. They claim that cosine similarity leads to codebook usage improvement
+this paper https://openreview.net/forum?id=pfNyExj7z2 proposed to use cosine similarity to replace the l2 distance in nearest neighbor computation. They claim that cosine similarity leads to codebook usage improvement.
 
 ```python
 import torch
@@ -41,3 +41,4 @@ vq = VectorQuantize(
 x = torch.randn(1, 1024, 256)
 quantized, indices, commit_loss = vq(x)
 ```
+
