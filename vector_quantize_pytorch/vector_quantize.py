@@ -14,9 +14,8 @@ def laplace_smoothing(x, n_categories, eps=1e-5):
 def orthogonal_loss_fn(t):
     n = t.shape[0]
     normed_codes = F.normalize(t, p = 2, dim = -1)
-    print(normed_codes.shape)
     cosine_sim = einsum(normed_codes, normed_codes, 'i d, j d -> i j')
-    print(cosine_sim)
+    print((cosine_sim ** 2).sum() / (n ** 2) - (1 / n))
     return (cosine_sim ** 2).sum() / (n ** 2) - (1 / n)
 
 def kmeans(x, num_clusters, num_iters=10, use_cosine_sim = False):
