@@ -1,8 +1,11 @@
 ## VQVAE Implementation
 
-VQVAE model from https://arxiv.org/abs/1711.00937
+VQVAE model from https://arxiv.org/abs/1711.00937. VQ could be used as a clustering algorithm.
 
 
+## Residual VQ
+
+RQVAE was intorduced in this paper to recursively quantize the residuals of the embedding. RQVAE could be viewd as a hierarchical clustering algorithm.
 
 ## Kmeans Initialization
 
@@ -44,6 +47,7 @@ quantized, indices, commit_loss = vq(x)
 
 ## Orthogonal Regularizer
 
+this paper https://arxiv.org/abs/2112.00384 introduces an orthogonal regularizer into the loss and claimed significant performance improvement on VQGAN
 
 ```python
 import torch
