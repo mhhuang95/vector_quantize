@@ -107,7 +107,7 @@ class EuclideanCodebook(nn.Module):
             ema_inplace(self.embed_avg, embed_sum.t(), self.decay)
             cluster_size = laplace_smoothing(self.cluster_size, self.codebook_size, self.eps) * self.cluster_size.sum()
             embed_normalized = self.embed_avg / cluster_size.unsqueeze(1)
-            self.embed.data.copy(embed_normalized)
+            self.embed.data.copy_(embed_normalized)
         
         return quantize, embed_ind
 
