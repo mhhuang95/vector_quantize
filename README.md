@@ -7,6 +7,20 @@ VQVAE model from https://arxiv.org/abs/1711.00937. VQ could be used as a cluster
 
 RQVAE was intorduced in this paper https://arxiv.org/abs/2107.03312 to recursively quantize the residuals of the embedding. RQVAE could be viewd as a hierarchical clustering algorithm.
 
+```python
+ vq = ResidualVQ(
+        num_quantizers=2,
+        n_embed = 512,
+        dim = 256,
+        decay = 0.8,
+        commitment = 1.,
+        kmeans_init=True, 
+        kmeans_iters=2,
+        use_cosine_sim = True,
+        orthogonal_reg_weight = 0.5,
+    )
+```
+
 ## Kmeans Initialization
 
 Initialize the codebook with kmeans centroid as proposed in this paper https://arxiv.org/abs/2107.03312
