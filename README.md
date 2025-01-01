@@ -5,7 +5,7 @@ VQVAE model from https://arxiv.org/abs/1711.00937. VQ could be used as a cluster
 
 ## Residual VQ
 
-RQVAE was intorduced in this paper to recursively quantize the residuals of the embedding. RQVAE could be viewd as a hierarchical clustering algorithm.
+RQVAE was intorduced in this paper https://arxiv.org/abs/2107.03312 to recursively quantize the residuals of the embedding. RQVAE could be viewd as a hierarchical clustering algorithm.
 
 ## Kmeans Initialization
 
