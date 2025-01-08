@@ -78,3 +78,28 @@ vq = VectorQuantize(
 x = torch.randn(1, 1024, 256)
 quantized, indices, commit_loss = vq(x)
 ```
+
+
+## Shared codebook in RQVAE
+
+Shared codebook was proposed in this paper https://arxiv.org/pdf/2203.01941 to reduce the parameter and increase the codebook utilization.
+
+
+```python
+import torch
+from vector_quantize_pytorch import VectorQuantize
+rq = ResidualVQ(
+    num_quantizers=2,
+    n_embed = 512,
+    shared_codebook = True,
+    dim = 256,
+    decay = 0.8,
+    commitment = 1.,
+    kmeans_init=True, 
+    kmeans_iters=2,
+    use_cosine_sim = True,
+    orthogonal_reg_weight = 0.5,
+)
+x = torch.randn(1, 1024, 256)
+quantized, indices, commit_loss = rq(x)
+```
