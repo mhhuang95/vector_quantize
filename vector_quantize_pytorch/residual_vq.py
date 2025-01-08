@@ -9,10 +9,20 @@ class ResidualVQ(nn.Module):
         *,
         num_quantizers,
         n_embed,
+        shared_codebook=False,
         **kwargs
     ):
         super().__init__()
         self.layers = nn.ModuleList([VectorQuantize(codebook_size=n_embed, **kwargs) for _ in range(num_quantizers)])
+
+        if not shared_codebook:
+            return
+        
+        first_vq, *rest_vq = self.layers
+        codebook = first_vq._codebook
+
+        for vq in rest_vq:
+            vq._codebook = codebook
 
     def forward(self, x):
         quantized_output = 0
