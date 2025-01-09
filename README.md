@@ -103,3 +103,24 @@ rq = ResidualVQ(
 x = torch.randn(1, 1024, 256)
 quantized, indices, commit_loss = rq(x)
 ```
+
+## Rotation Trick in VQ
+
+The rotation trick introduced in this paper https://arxiv.org/pdf/2410.06424, which propagate gradients smoothly through the vector quantization.
+
+```python
+import torch
+from vector_quantize_pytorch import VectorQuantize
+vq = VectorQuantize(
+    dim = 256,
+    codebook_size = 256,
+    num_quantizers = 4,
+    kmeans_init = True,   # set to True
+    kmeans_iters = 10     # number of kmeans iterations to calculate the centroids for the codebook on init
+    use_cosine_sim = True,
+    orthogonal_reg_weight = 0.5,
+    rotation_trick=True,
+)
+x = torch.randn(1, 1024, 256)
+quantized, indices, commit_loss = vq(x)
+```
