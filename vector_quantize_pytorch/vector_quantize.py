@@ -174,7 +174,20 @@ class CosineSimCodebook(nn.Module):
 
 
 class VectorQuantize(nn.Module):
-    def __init__ (self, dim, codebook_size, codebook_dim = None, decay=0.1, commitment=1., eps=1e-5, kmeans_init=False, kmeans_iters=10, use_cosine_sim=False, orthogonal_reg_weight = 0.,):
+    def __init__ (
+        self,
+        dim,
+        codebook_size, 
+        codebook_dim = None, 
+        decay=0.1, commitment=1., 
+        eps=1e-5, 
+        kmeans_init=False, 
+        kmeans_iters=10, 
+        use_cosine_sim=False, 
+        orthogonal_reg_weight = 0., 
+        straight_through=False,
+        rotation_trick=True
+    ):
         super().__init__()
 
         if not codebook_dim:
@@ -203,6 +216,16 @@ class VectorQuantize(nn.Module):
             decay = decay,
             eps = eps,
         )
+
+        assert not (straight_through and rotation_trick)
+        self.rotation_trick = rotation_trick
+
+    @staticmethod
+    def rotation_trick_transform(u, q, e):
+        w = ((u + q) / torch.norm(u + q, dim = 1, keepdim=True)).detach()
+        e = e - 2 * torch.bmm(torch.bmm(e, w.unsqueeze(-1)), w.unsqueeze(1)) + 2 * torch.bmm(
+            torch.bmm(e, u.unsqueeze(-1).detach()), q.unsqueeze(1).detach())
+        return e
     
     @property
     def codebook(self):
@@ -224,8 +247,24 @@ class VectorQuantize(nn.Module):
                 orthogonal_reg_loss = orthogonal_loss_fn(codebook)
                 loss = loss + orthogonal_reg_loss * self.orthogonal_reg_weight
 
-            # straight through for gradient transfer
-            quantize = x + (quantize - x).detach()
+            if self.rotation_trick:
+                init_shape = x.shape
+                x = x.reshape(-1, init_shape[-1])
+                quantize = quantize.reshape(-1, init_shape[-1])
+
+                eps = 1e-10
+                rot_quantize = self.rotation_trick_transform(
+                    x / (torch.norm(x, dim=1, keepdim=True) + eps),
+                    quantize / (torch.norm(quantize, dim=1, keepdim=True) + eps),
+                    x.unsqueeze(1)).squeeze()
+                quantize = rot_quantize * (torch.norm(quantize, dim=1, keepdim=True) / (torch.norm(x, dim=1, keepdim=True) + eps)).detach()
+
+                x = x.reshape(init_shape)
+                quantize = quantize.reshape(init_shape)
+
+            else:
+                # straight through for gradient transfer
+                quantize = x + (quantize - x).detach()
         
         quantize = self.projection_out(quantize)
         return quantize, embed_ind, loss
