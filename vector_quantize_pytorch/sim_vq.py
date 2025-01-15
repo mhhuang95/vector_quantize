@@ -5,7 +5,7 @@ from torch import nn
 from torch.nn import Module
 import torch.nn.functional as F
 
-from einx import get_at
+# from einx import get_at
 from einops import einsum, rearrange, repeat, reduce, pack, unpack
 
 def identity(x):
@@ -33,7 +33,8 @@ class SimVQ(Module):
             dist = torch.cdist(x, implicit_codebook)
             indices = dist.argmin(dim = -1)
         
-        quantized = get_at('[c] d, b n -> b n d', implicit_codebook, indices)
+        # quantized = get_at('[c] d, b n -> b n d', implicit_codebook, indices)
+        quantized = F.embedding(indices, implicit_codebook)
 
         commit_loss = (F.pairwise_distance(x, quantized.detach())**2).mean()
 
