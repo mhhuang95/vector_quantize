@@ -124,3 +124,19 @@ vq = VectorQuantize(
 x = torch.randn(1, 1024, 256)
 quantized, indices, commit_loss = vq(x)
 ```
+
+## SimVQ
+
+SimVQ was proposed in this paper https://arxiv.org/abs/2411.02038 to resolve the problem of representation collapse
+
+```python
+import torch
+from vector_quantize_pytorch import SimVQ
+simvq = SimVQ(
+    dim=512,
+    codebook_size=1024,
+)
+x = torch.randn(1, 1024, 512)
+quantize, embed_ind, commit_loss = simvq(x)
+print("Loss:", commit_loss)
+```
