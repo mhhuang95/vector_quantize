@@ -11,6 +11,38 @@ from einops import einsum, rearrange, repeat, reduce, pack, unpack
 def identity(x):
     return x
 
+def exists(v):
+    return v is not None
+
+def default(v, d):
+    return v if exists(v) else d
+
+def safe_div(num, den, eps=1e-6):
+    return num / den.clamp(min=eps)
+
+def pack_one(t, pattern):
+    packed, packed_shape = pack([t], pattern)
+
+    def inverse(out, inv_pattern=None):
+        inv_pattern = default(inv_pattern, pattern)
+        out, = unpack(out, packed_shape, inv_pattern)
+        return out
+    
+    return packed, inverse
+
+def l2norm(x, dim=-1):
+    return F.normalize(x, dim=dim)
+
+def efficient_rotation_trick_transform(u, q, e):
+    e = rearrange(e, 'b d -> b 1 d')
+    w = l2norm(u + q, dim = 1).detach()
+    return (
+        e - 
+        2 * (e @ rearrange(w, 'b d -> b d 1') @ rearrange(w, 'b d -> b 1 d')) + 
+        2 * (e @ rearrange(u, 'b d -> b d 1').detach() @ rearrange(q, 'b d -> b 1 d').detach())
+    )
+
+
 class SimVQ(Module):
     def __init__(
         self, 
@@ -40,7 +72,24 @@ class SimVQ(Module):
 
         # straight through
 
-        quantized = x + (quantized - x).detach()
+        # quantized = x + (quantized - x).detach()
+
+        x, inverse = pack_one(x, '* d')
+        quantized, _ = pack_one(quantized, '* d')
+
+        norm_x = x.norm(dim=-1, keepdim = True)
+        norm_quantize = quantized.norm(dim = -1, keepdim = True)
+
+        rot_quantize = efficient_rotation_trick_transform(
+            safe_div(x, norm_x),
+            safe_div(quantized, norm_quantize),
+            x
+        ).squeeze()
+
+        quantized = rot_quantize * safe_div(norm_quantize, norm_x).detach()
+
+        x, quantized = inverse(x), inverse(quantized)
+
 
         return quantized, indices, commit_loss
         
